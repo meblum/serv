@@ -90,11 +90,12 @@ type server struct {
 	ctx        context.Context
 }
 
-// FileServer is a wrapper around http.FileServer from the standard library which adds a tiny script to served HTML files.
-// The script keeps a long-running HTTP connection between the document and server, the server will notify the script when the document or any dependency has changed
-// and the script will reload the page.
+// FileServer is a wrapper around http.FileServer which adds a tiny script to served HTML files.
+// The script keeps a long-running HTTP connection between the document and server
+// and the script will be notified when the document or any of its dependencies have changed.
+// When the script receives an update notification, it will reload the page.
 //
-// Cancelling the ctx, will cancel the long-running http connection.
+// Cancelling ctx, will close the long-running HTTP connections.
 func FileServer(ctx context.Context, fsys fs.FS) http.Handler {
 	return &server{
 		m:          newMultiplexer(fsys),
