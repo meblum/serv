@@ -68,8 +68,9 @@ type notifications struct {
 
 // broadcaster polls a pathCheck at an interval and notifies subscribers when a file has been modified.
 type broadcaster struct {
-	changeDetector *pathCheck
-	interval       time.Duration
+	changeDetector  *pathCheck
+	interval        time.Duration
+	beforeBroadcast func(val string)
 
 	mu     sync.Mutex
 	sub    map[notifications]struct{}
@@ -77,12 +78,14 @@ type broadcaster struct {
 }
 
 // newBroadcaster returns a new broadcaster to which subscribers can subscribe for modifications detected by polling checker at interval.
+// Before broadcasting a file modification to subscribers, beforeBroadcast will be called with the modified filename.
 // The broadcaster will not start polling automatically upon creation, use start() to start polling.
-func newBroadcaster(checker *pathCheck, interval time.Duration) *broadcaster {
+func newBroadcaster(checker *pathCheck, interval time.Duration, beforeBroadcast func(val string)) *broadcaster {
 	pub := broadcaster{
-		changeDetector: checker,
-		interval:       interval,
-		sub:            make(map[notifications]struct{}),
+		changeDetector:  checker,
+		interval:        interval,
+		sub:             make(map[notifications]struct{}),
+		beforeBroadcast: beforeBroadcast,
 	}
 	return &pub
 }
@@ -108,6 +111,7 @@ func (b *broadcaster) start() {
 				}
 				b.mu.Unlock()
 			} else if ok {
+				b.beforeBroadcast(ev)
 				b.mu.Lock()
 				for s := range b.sub {
 					send(s.eventCh, ev)
@@ -226,7 +230,15 @@ func (m *multiplexer) register(key loadablePath, value loaderPath) error {
 		if err != nil {
 			return err
 		}
-		broadcaster := newBroadcaster(pc, 250*time.Millisecond)
+		broadcaster := newBroadcaster(pc, 250*time.Millisecond, func(val string) {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			for k, v := range m.topic {
+				if _, ok := v[loaderPath(val)]; ok {
+					delete(m.topic, k)
+				}
+			}
+		})
 		m.broadcaster[value] = broadcaster
 	}
 

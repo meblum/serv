@@ -247,6 +247,39 @@ func Test_FileServerClearOnUnsubscribe(t *testing.T) {
 	}
 }
 
+func Test_FileServerClearOnFileChange(t *testing.T) {
+	dir := "testdata"
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ts := httptest.NewServer(serv.FileServer(ctx, os.DirFS(dir)))
+	defer func() {
+		cancel()
+		ts.Close()
+	}()
+
+	createMapping := func() {
+		requestFile("index.html", "root.html", true, ts)
+		requestFile("index.js", "index.html", false, ts)
+		requestFile("index-module.js", "index.js", false, ts)
+	}
+
+	createMapping()
+	requestSSE("index.html", ts, t)
+	createFile("index.js", t)
+	time.Sleep(500 * time.Millisecond)
+	res2 := requestSSE("index.html", ts, t)
+	createFile("index-module.js", t)
+	select {
+	case r := <-res2:
+		t.Errorf("expected no event for create index-module.js, got %v", r)
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
 func requestSSE(refererFile string, s *httptest.Server, t *testing.T) <-chan string {
 	url := s.URL + "/"
 	if refererFile != "index.html" {
