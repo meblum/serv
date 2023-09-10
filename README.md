@@ -1,17 +1,17 @@
-# `serv`
+# serv
 
-A zero-config, dependency free, pure Go, local file server that serves a directory on your file system over http and automatically reloads html files in the browser on change.
+A cross platform, zero-config, dependency free, pure Go local file server that serves a directory on your file system over HTTP and automatically reloads HTML files in the browser when the document or any of its dependencies have changed.
 
 ## Install
-Assuming you have [downloaded go](https://go.dev/dl/), simply run
+The simplest and easiest way to compile and install this tool is by using the [Go command](https://go.dev/dl/). Simply run
 
 `go install github.com/meblum/serv/cmd/serv@latest`
 
 ## Usage
-running the `serv` command starts a local server on port 8080 and serves the current directory. The server injects a tiny script to html documents that tells the browser to reload when a change is detected.
+Running the `serv` command starts a local server that serves the current directory on port 8080. Navigating to a directory will return an auto generated index of the directory, if an index.html file is present in the directory, it will be served instead. By default, all HTML documents will be injected with a tiny script which will tell the browser to reload when a change is detected.
 
 ## Config
-A main design goal is to keep this tool extremely simple. A few optional flags may be set as follows:
+A main design goal was to keep this tool extremely simple. A few optional flags may be set as follows:
 ```
 -dir string
         directory to serve (default ".")
@@ -22,10 +22,10 @@ A main design goal is to keep this tool extremely simple. A few optional flags m
 ```
 ## How it works
 The server adds a tiny script to served HTML files.
-The script keeps a long-running HTTP connection between the document and the server, and the server keeps a mapping of files the HTML document depends on. The server notifies the script when a file has changed and the script will reloads the page.
+The script keeps a [long-running](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) HTTP connection between the document and the server, and the server keeps a mapping of files the HTML document depends on. The server notifies the script when a file has changed and the script reloads the page.
 
-## Use as a Go library
-The module exposes a single `FileServer` function that returns the file server as an `http.Handler`. Please see the [go doc](https://pkg.go.dev/github.com/meblum/serv) for more information
+## Use as a Go module
+You can use and extend the functionality of this tool. The module exposes a single `FileServer` function that returns the file server as an `http.Handler`. Please refer to the [go doc](https://pkg.go.dev/github.com/meblum/serv) for more information.
 
 ## License
 ```
