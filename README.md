@@ -8,13 +8,11 @@ The simplest and easiest way to compile and install this tool is by using the [G
 `go install github.com/meblum/serv/cmd/serv@latest`
 
 ## Usage
-Running the `serv` command starts a local server that serves the current directory on port 8080. Navigating to a directory will return an auto generated index of the directory, if an index.html file is present in the directory, it will be served instead. By default, all HTML documents will be injected with a tiny script which will tell the browser to reload when a change is detected.
+Running the `serv` command starts a local server that serves the current directory on port 8080. Use `serv path/to/directory` to specify a different directory to serve. Navigating to a directory will return an auto generated index of the directory, if an index.html file is present in the directory, it will be served instead. By default, all HTML documents will be injected with a tiny script which will tell the browser to reload when a change is detected.
 
 ## Config
 A main design goal was to keep this tool extremely simple. A few optional flags may be set as follows:
 ```
--dir string
-        directory to serve (default ".")
 -no-reload
         serve without reloading on file update
 -port int

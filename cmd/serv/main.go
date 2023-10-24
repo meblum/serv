@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/meblum/serv"
@@ -26,14 +27,17 @@ func main() {
 	dir := "."
 	noReload := false
 
-	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	fs := flag.NewFlagSet(filepath.Base(os.Args[0]), flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: %s [directory (default \".\")] [-option]\n", fs.Name())
+		fs.PrintDefaults()
+	}
 	fs.IntVar(&port, "port", port, "port to serve on")
-	fs.StringVar(&dir, "dir", dir, "directory to serve")
 	fs.BoolVar(&noReload, "no-reload", noReload, "serve without reloading on file update")
 	fs.Parse(os.Args[1:])
-	if dir == "" {
-		log.Println("directory path empty (missing quotes?)")
-		os.Exit(1)
+	arg := fs.Arg(0)
+	if arg != "" {
+		dir = arg
 	}
 	sseContext, cancelSSE := context.WithCancel(context.Background())
 	defer cancelSSE()
