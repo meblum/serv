@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -14,10 +16,16 @@ import (
 	"github.com/meblum/serv"
 )
 
-func exitIfError(err error) {
-	if err != nil {
+func logInvalidPath(dirPath string) {
+	notDirMsg := fmt.Sprintf("warning: %q is not an existing directory", dirPath)
+	fileInfo, err := os.Stat(dirPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		log.Println(notDirMsg)
+	case err != nil:
 		log.Println(err)
-		os.Exit(1)
+	case !fileInfo.IsDir():
+		log.Println(notDirMsg)
 	}
 }
 
@@ -39,6 +47,7 @@ func main() {
 	if arg != "" {
 		dir = arg
 	}
+	logInvalidPath(dir)
 	sseContext, cancelSSE := context.WithCancel(context.Background())
 	defer cancelSSE()
 	fServer := serv.FileServer(sseContext, os.DirFS(dir))
@@ -63,5 +72,8 @@ func main() {
 	<-shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	exitIfError(srv.Shutdown(ctx))
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
 }
