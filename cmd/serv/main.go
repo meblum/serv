@@ -37,12 +37,16 @@ func main() {
 
 	fs := flag.NewFlagSet(filepath.Base(os.Args[0]), flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: %s [directory (default \".\")] [-option]\n", fs.Name())
+		fmt.Fprintf(fs.Output(), "Usage: %s [-options] [directory (default \".\")]\n", fs.Name())
 		fs.PrintDefaults()
 	}
 	fs.IntVar(&port, "port", port, "port to serve on")
 	fs.BoolVar(&noReload, "no-reload", noReload, "serve without reloading on file update")
 	fs.Parse(os.Args[1:])
+	if fs.NArg() > 1 {
+		log.Fatalf("invalid arg %q (options must not be defined after file argument)", fs.Arg(1))
+	}
+
 	arg := fs.Arg(0)
 	if arg != "" {
 		dir = arg
