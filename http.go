@@ -96,11 +96,11 @@ type server struct {
 // When the script receives an update notification, it will reload the page.
 //
 // Cancelling ctx, will close the long-running HTTP connections.
-func FileServer(ctx context.Context, fsys fs.FS) http.Handler {
+func FileServer(ctx context.Context, root fs.FS) http.Handler {
 	return &server{
-		m:          newMultiplexer(fsys),
-		fsys:       fsys,
-		fileServer: http.FileServer(http.FS(fsys)),
+		m:          newMultiplexer(root),
+		fsys:       root,
+		fileServer: http.FileServerFS(root),
 		ctx:        ctx,
 	}
 }
