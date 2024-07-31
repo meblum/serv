@@ -3,20 +3,37 @@
 A cross platform, zero-config, dependency free, pure Go local file server that serves a directory on your file system over HTTP and automatically reloads HTML files in the browser when the document or any of its dependencies have changed.
 
 ## Install
-The simplest and easiest way to compile and install this tool is by using the [Go command](https://go.dev/dl/). Simply run
+The simplest to install this tool is by using the [Go command](https://go.dev/dl/). Simply run
 
 `go install github.com/meblum/serv/cmd/serv@latest`
 
-## Usage
-Running the `serv` command starts a local server that serves the current directory on port 8080. Use `serv path/to/directory` to specify a different directory to serve. Navigating to a directory will return an auto generated index of the directory, if an index.html file is present in the directory, it will be served instead. By default, all HTML documents will be injected with a tiny script which will tell the browser to reload when a change is detected.
+## Overview
+Running the `serv` command starts a local server that serves the current directory on port `8080` and automatically shuts down after 30 minutes of idle time (no request to the server).
 
-## Config
-A main design goal was to keep this tool extremely simple. A few optional flags may be set as follows:
+Auto shutdown can be configured with the `--shutdown-after` flag where you can pass any value that is understood by the Go [time.ParseDuration](https://pkg.go.dev/time#ParseDuration) function, for example `--shutdown-after=1.5h` (or `--shutdown-after=0` to disable shutdown).
+
+Use `serv path/to/directory` to specify a different directory to serve. Navigating to a directory will return an auto generated index of the directory, if an index.html file is present in the directory, it will be served instead. By default, all HTML documents will be injected with a tiny script which will tell the browser to reload when a change is detected.
+
+Use the `--no-reload` flag to simply serve the directory without reloading, and `--port` to use an alternative port.
+
+## Flags
+A main design goal was to keep this tool extremely simple. A few optional flags may be set.
+
+As an example:
+
 ```
--no-reload
+serv --no-reload --port=4200 --shutdown-after=2h path/to/dir
+```
+
+run `serv --help` to display the following help message:
+```
+Usage (v0.0.9): serv [-options] [directory (default ".")]
+  -no-reload
         serve without reloading on file update
--port int
+  -port int
         port to serve on (default 8080)
+  -shutdown-after duration
+        shutdown after idle time ("0" for no shutdown) (default 30m0s)
 ```
 ## How it works
 The server adds a tiny script to served HTML files.
