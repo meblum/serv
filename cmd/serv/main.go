@@ -94,20 +94,6 @@ func getOptions() config {
 	}
 }
 
-func resetTimerOnRequest(h http.Handler, resetTimeoutFn func(time.Duration) bool, timeoutDuration time.Duration, resetLogFn func(time.Duration) bool, logDuration time.Duration) http.Handler {
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		isSSE := r.URL.Path == "/" && r.Header.Get("Accept") == "text/event-stream"
-		if !isSSE {
-			resetTimeoutFn(timeoutDuration)
-			if rescheduled := resetLogFn(logDuration); !rescheduled { // warning has not been given yet
-				log.Println("shutdown reset")
-			}
-		}
-		h.ServeHTTP(w, r)
-	})
-}
-
 func fileServer(config config) *http.Server {
 	port := fmt.Sprintf(":%v", config.port)
 	dirFS := os.DirFS(config.dir)
@@ -151,13 +137,23 @@ func main() {
 		})
 		defer logTimer.Stop()
 
-		server.Handler = resetTimerOnRequest(
-			server.Handler,
-			shutdownTimer.Reset,
-			conf.shutdownAfter,
-			logTimer.Reset,
-			logAfter,
-		)
+		h := server.Handler
+		resetShutdownMiddleware := func(w http.ResponseWriter, r *http.Request) {
+			isSSE := r.URL.Path == "/" && r.Header.Get("Accept") == "text/event-stream"
+			if !isSSE {
+				if rescheduled := shutdownTimer.Reset(conf.shutdownAfter); !rescheduled {
+					// shutdown in progress
+					http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+					return
+				}
+				if rescheduled := logTimer.Reset(logAfter); !rescheduled {
+					// warning has been given
+					log.Println("shutdown reset")
+				}
+			}
+			h.ServeHTTP(w, r)
+		}
+		server.Handler = http.HandlerFunc(resetShutdownMiddleware)
 	}
 
 	go func() {
