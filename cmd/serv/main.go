@@ -30,16 +30,18 @@ func logInvalidPath(dirPath string) {
 }
 
 type config struct {
-	port   int
-	dir    string
-	reload bool
+	port          int
+	dir           string
+	reload        bool
+	shutdownAfter time.Duration
 }
 
 func getOptions() config {
 	defaultConfig := config{
-		port:   8080,
-		dir:    ".",
-		reload: true,
+		port:          8080,
+		dir:           ".",
+		reload:        true,
+		shutdownAfter: time.Minute * 30,
 	}
 
 	fs := flag.NewFlagSet(filepath.Base(os.Args[0]), flag.ExitOnError)
@@ -50,6 +52,7 @@ func getOptions() config {
 
 	port := fs.Int("port", defaultConfig.port, "port to serve on")
 	noReload := fs.Bool("no-reload", !defaultConfig.reload, "serve without reloading on file update")
+	shutdownAfter := fs.Duration("shutdown-after", defaultConfig.shutdownAfter, "shutdown after idle time (\"0\" for no shutdown)")
 	fs.Parse(os.Args[1:])
 	if fs.NArg() > 1 {
 		log.Fatalf("invalid arg %q (options must not be defined after file argument)", fs.Arg(1))
@@ -60,10 +63,21 @@ func getOptions() config {
 	}
 	logInvalidPath(dir)
 	return config{
-		port:   *port,
-		reload: !*noReload,
-		dir:    dir,
+		port:          *port,
+		reload:        !*noReload,
+		dir:           dir,
+		shutdownAfter: *shutdownAfter,
 	}
+}
+
+func resetTimerOnRequest(h http.Handler, resetFn func(time.Duration), d time.Duration) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isSSE := r.URL.Path == "/" && r.Header.Get("Accept") == "text/event-stream"
+		if !isSSE {
+			resetFn(d)
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 func fileServer(config config) *http.Server {
@@ -89,10 +103,20 @@ func fileServer(config config) *http.Server {
 func main() {
 	log.SetFlags(0)
 	conf := getOptions()
-	server := fileServer(conf)
 
 	interruptCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	server := fileServer(conf)
+	if conf.shutdownAfter != 0 {
+		timer := time.AfterFunc(conf.shutdownAfter, func() {
+			log.Println("idle timeout: shutting down")
+			stop()
+		})
+		defer timer.Stop()
+		server.Handler = resetTimerOnRequest(server.Handler, func(d time.Duration) {
+			timer.Reset(d)
+		}, conf.shutdownAfter)
+	}
 
 	go func() {
 		log.Printf("serving files in \"%v\" at http://localhost%v", conf.dir, server.Addr)
