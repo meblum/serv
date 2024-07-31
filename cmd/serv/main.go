@@ -94,11 +94,15 @@ func getOptions() config {
 	}
 }
 
-func resetTimerOnRequest(h http.Handler, resetFn func(time.Duration), d time.Duration) http.Handler {
+func resetTimerOnRequest(h http.Handler, resetTimeoutFn func(time.Duration) bool, timeoutDuration time.Duration, resetLogFn func(time.Duration) bool, logDuration time.Duration) http.Handler {
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		isSSE := r.URL.Path == "/" && r.Header.Get("Accept") == "text/event-stream"
 		if !isSSE {
-			resetFn(d)
+			resetTimeoutFn(timeoutDuration)
+			if rescheduled := resetLogFn(logDuration); !rescheduled { // warning has not been given yet
+				log.Println("shutdown reset")
+			}
 		}
 		h.ServeHTTP(w, r)
 	})
@@ -132,14 +136,28 @@ func main() {
 	defer stop()
 	server := fileServer(conf)
 	if conf.shutdownAfter != 0 {
-		timer := time.AfterFunc(conf.shutdownAfter, func() {
+		shutdownTimer := time.AfterFunc(conf.shutdownAfter, func() {
 			log.Println("idle timeout: shutting down")
 			stop()
 		})
-		defer timer.Stop()
-		server.Handler = resetTimerOnRequest(server.Handler, func(d time.Duration) {
-			timer.Reset(d)
-		}, conf.shutdownAfter)
+		defer shutdownTimer.Stop()
+
+		logAfter := conf.shutdownAfter - 2*time.Minute
+		if logAfter < 0 {
+			logAfter = 0
+		}
+		logTimer := time.AfterFunc(logAfter, func() {
+			log.Printf("warning: server will shutdown in %v unless an HTTP request is received", conf.shutdownAfter-logAfter)
+		})
+		defer logTimer.Stop()
+
+		server.Handler = resetTimerOnRequest(
+			server.Handler,
+			shutdownTimer.Reset,
+			conf.shutdownAfter,
+			logTimer.Reset,
+			logAfter,
+		)
 	}
 
 	go func() {
