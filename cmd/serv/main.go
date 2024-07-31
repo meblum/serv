@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
+	"slices"
 	"time"
 
 	"github.com/meblum/serv"
@@ -36,6 +38,23 @@ type config struct {
 	shutdownAfter time.Duration
 }
 
+func getVersion() (string, error) {
+	buildInfo, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", errors.New("build information is available only in binaries built with module support")
+	}
+	if buildInfo.Main.Version != "(devel)" {
+		return buildInfo.Main.Version, nil
+	}
+	i := slices.IndexFunc(buildInfo.Settings, func(b debug.BuildSetting) bool {
+		return b.Key == "vcs.revision"
+	})
+	if i == -1 {
+		return "", errors.New("vcs.revision not found")
+	}
+	return "version " + buildInfo.Settings[i].Value[0:7], nil
+}
+
 func getOptions() config {
 	defaultConfig := config{
 		port:          8080,
@@ -46,7 +65,12 @@ func getOptions() config {
 
 	fs := flag.NewFlagSet(filepath.Base(os.Args[0]), flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: %s [-options] [directory (default \".\")]\n", fs.Name())
+		version, err := getVersion()
+		if err != nil {
+			version = "version unknown"
+			log.Println(err)
+		}
+		fmt.Fprintf(fs.Output(), "Usage (%s): %s [-options] [directory (default \".\")]\n", version, fs.Name())
 		fs.PrintDefaults()
 	}
 
