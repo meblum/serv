@@ -15,7 +15,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/meblum/serv"
+	"github.com/meblum/serv/reload"
 )
 
 func logInvalidPath(dirPath string) {
@@ -108,7 +108,7 @@ func fileServer(config config) *http.Server {
 	sseContext, cancelSSE := context.WithCancel(context.Background())
 	srv := &http.Server{
 		Addr:    port,
-		Handler: serv.FileServer(sseContext, dirFS),
+		Handler: reload.FileServer(sseContext, dirFS),
 	}
 	srv.RegisterOnShutdown(cancelSSE)
 	return srv

@@ -1,4 +1,4 @@
-package serv_test
+package reload_test
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/meblum/serv"
+	"github.com/meblum/serv/reload"
 )
 
 func Test_FileServerInjectScript(t *testing.T) {
@@ -72,7 +72,7 @@ func Test_FileServerInjectScript(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	s := serv.FileServer(context.Background(), os.DirFS(dir))
+	s := reload.FileServer(context.Background(), os.DirFS(dir))
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -138,7 +138,7 @@ func Test_FileServerNotifyFileUpdate(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ts := httptest.NewServer(serv.FileServer(ctx, os.DirFS(dir)))
+	ts := httptest.NewServer(reload.FileServer(ctx, os.DirFS(dir)))
 	defer func() {
 		cancel()
 		ts.Close()
@@ -188,7 +188,7 @@ func Test_FileServerMultiSubscribe(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ts := httptest.NewServer(serv.FileServer(ctx, os.DirFS(dir)))
+	ts := httptest.NewServer(reload.FileServer(ctx, os.DirFS(dir)))
 	defer func() {
 		cancel()
 		ts.Close()
@@ -222,7 +222,7 @@ func Test_FileServerClearOnUnsubscribe(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ts := httptest.NewServer(serv.FileServer(ctx, os.DirFS(dir)))
+	ts := httptest.NewServer(reload.FileServer(ctx, os.DirFS(dir)))
 	defer func() {
 		cancel()
 		ts.Close()
@@ -255,7 +255,7 @@ func Test_FileServerClearOnFileChange(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ts := httptest.NewServer(serv.FileServer(ctx, os.DirFS(dir)))
+	ts := httptest.NewServer(reload.FileServer(ctx, os.DirFS(dir)))
 	defer func() {
 		cancel()
 		ts.Close()

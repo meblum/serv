@@ -1,6 +1,6 @@
-// Package serv provides an http.Handler that serves files an fs.FS and provides the capability to reload HTML files when they have been updated.
+// Package reload provides an http.Handler that serves files an fs.FS and provides the capability to reload HTML files when they have been updated.
 // Please see the documentation on the FileServer() function
-package serv
+package reload
 
 import (
 	"context"
@@ -90,7 +90,7 @@ type server struct {
 	ctx        context.Context
 }
 
-// FileServer is a wrapper around http.FileServer which adds a tiny script to served HTML files.
+// FileServer is a wrapper around http.FileServerFS which adds a tiny script to served HTML files.
 // The script keeps a long-running HTTP connection between the document and server
 // and the script will be notified when the document or any of its dependencies have changed.
 // When the script receives an update notification, it will reload the page.
