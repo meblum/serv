@@ -162,7 +162,7 @@ func Test_FileServerNotifyFileUpdate(t *testing.T) {
 				createMapping()
 				res := requestSSE("index.html", ts, t)
 				updateFn[v](f, t)
-				expect := fmt.Sprintf("data: %v\n\n", f)
+				expect := "data:\n\n"
 				if r := <-res; r != expect {
 					t.Errorf("expected response body %q, got %q", expect, r)
 				}
@@ -179,6 +179,90 @@ func Test_FileServerNotifyFileUpdate(t *testing.T) {
 	}
 
 }
+
+func Test_FileServerNotifyRootFileUpdateBeforeSSE(t *testing.T) {
+	dir := "testdata"
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.RemoveAll(dir)
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ts := httptest.NewServer(reload.FileServer(ctx, os.DirFS(dir)))
+	defer func() {
+		cancel()
+		ts.Close()
+	}()
+
+	createMapping := func() {
+		requestFile("index.html", "root.html", true, ts)
+		requestFile("index.js", "index.html", false, ts)
+	}
+
+	createFile("index.html", t)
+	createFile("index.js", t)
+	createMapping()
+	requestSSE("index.html", ts, t)
+
+	updateFile("index.html", t)
+	time.Sleep(1 * time.Second)
+	createMapping()
+	time.Sleep(1 * time.Second)
+	updateFile("index.html", t)
+	time.Sleep(2 * time.Second)
+	res := requestSSE("index.html", ts, t)
+	time.Sleep(1 * time.Second)
+	updateFile("index.js", t)
+	time.Sleep(1 * time.Second)
+	expect := "data:\n\n"
+	if r := <-res; r != expect {
+		t.Errorf("expected response body %q, got %q", expect, r)
+	}
+}
+
+// func Test_FileServerNotifyScriptFileUpdateBeforeSSE(t *testing.T) {
+// 	dir := "testdata"
+// 	if err := os.Mkdir(dir, 0700); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	t.Cleanup(func() {
+// 		os.RemoveAll(dir)
+// 	})
+
+// 	ctx, cancel := context.WithCancel(context.Background())
+// 	ts := httptest.NewServer(reload.FileServer(ctx, os.DirFS(dir)))
+// 	defer func() {
+// 		cancel()
+// 		ts.Close()
+// 	}()
+
+// 	createMapping := func() {
+// 		requestFile("index.html", "root.html", true, ts)
+// 		requestFile("index.js", "index.html", false, ts)
+// 	}
+
+// 	createFile("index.html", t)
+// 	createFile("index.js", t)
+// 	createMapping()
+// 	requestSSE("index.html", ts, t)
+
+// 	updateFile("index.js", t)
+// 	time.Sleep(1 * time.Second)
+// 	createMapping()
+// 	time.Sleep(1 * time.Second)
+// 	updateFile("index.js", t)
+// 	time.Sleep(2 * time.Second)
+// 	res := requestSSE("index.html", ts, t)
+// 	time.Sleep(1 * time.Second)
+// 	updateFile("index.js", t)
+// 	time.Sleep(1 * time.Second)
+// 	expect := "data:\n\n"
+// 	if r := <-res; r != expect {
+// 		t.Errorf("expected response body %q, got %q", expect, r)
+// 	}
+// }
 
 func Test_FileServerMultiSubscribe(t *testing.T) {
 	dir := "testdata"
@@ -207,7 +291,7 @@ func Test_FileServerMultiSubscribe(t *testing.T) {
 	createFile("index-module.js", t)
 	res1E, res2E := <-res1, <-res2
 
-	expect := fmt.Sprintf("data: %v\n\n", "index-module.js")
+	expect := "data:\n\n"
 	if res1E != expect || res2E != expect {
 		t.Errorf("expected response body %q, got res1: %q, res2: %q", expect, res1E, res2E)
 	}

@@ -8,150 +8,136 @@ import (
 	"time"
 )
 
-// pathCheck allows you to check if content at a filepath has been modified.
-type pathCheck struct {
-	fsys    fs.FS
-	name    string
-	size    int64
-	modTime time.Time
-}
+// fsNotify monitors `fsys` for a file change at `path`.
+// It checks the file's modification time and size on `interval`
+// and sends a nil error through the returned channel when a change is detected.
+// Monitoring stops either when a change is found, an error occurs, or
+// the provided context is canceled.
+//
+// THe channel will return an error if monitoring fails, or the context's error if canceled.
+func fsNotify(ctx context.Context, fsys fs.FS, path string, interval time.Duration) <-chan error {
+	notify := make(chan error, 1)
 
-// newPathCheck returns a new pathCheck for path in fsys.
-// An error is returned if there is an error retrieving the path content status.
-func newPathCheck(fsys fs.FS, path string) (*pathCheck, error) {
-	s, err := fs.Stat(fsys, path)
-	info := pathCheck{
-		name: path,
-		fsys: fsys,
+	// stat retrieves the modification time and size of the file at the given path.
+	// It returns zero values if the file does not exist and an error for any other issues.
+	stat := func() (time.Time, int64, error) {
+		s, err := fs.Stat(fsys, path)
+		if err == nil {
+			return s.ModTime(), s.Size(), nil
+		}
+		if errors.Is(err, fs.ErrNotExist) {
+			return time.Time{}, 0, nil
+		}
+		return time.Time{}, 0, err
 	}
 
-	if errors.Is(err, fs.ErrNotExist) {
-		return &info, nil
-	}
-	if err != nil {
-		return nil, err
-	}
+	go func() {
+		t := time.NewTicker(interval)
+		modTime, size, err := stat()
+		if err != nil {
+			notify <- err
+			return
+		}
 
-	info.modTime = s.ModTime()
-	info.size = s.Size()
-	return &info, nil
+		for {
+			select {
+			case <-ctx.Done():
+				notify <- ctx.Err()
+				return
+			default:
+			}
+
+			select {
+			case <-t.C:
+				pSize := size
+				pModtime := modTime
+				modTime, size, err = stat()
+				if err != nil {
+					notify <- err
+					return
+				}
+				if modTime != pModtime || size != pSize {
+					notify <- nil
+					return
+				}
+			case <-ctx.Done():
+				notify <- ctx.Err()
+				return
+			}
+		}
+	}()
+	return notify
 }
 
-// modified returns the file path as passed to newFileChangeDetector
-// and true if the content at the path has modified since last check (or since creation if this is the first check).
-// An error is returned if there is an error retrieving the path content status.
-func (p *pathCheck) modified() (string, bool, error) {
-	stat, err := fs.Stat(p.fsys, p.name)
-
-	prevModTime := p.modTime
-	prevModSize := p.size
-
-	switch {
-	case err == nil:
-		p.modTime = stat.ModTime()
-		p.size = stat.Size()
-	case errors.Is(err, fs.ErrNotExist):
-		p.modTime = time.Time{}
-		p.size = 0
-	default:
-		return p.name, false, err
-	}
-
-	return p.name, p.modTime != prevModTime || p.size != prevModSize, nil
-}
-
-// notifications are the event channels for a subscriber
-type notifications struct {
-	eventCh chan string
-	errCh   chan error
-}
-
-// broadcaster polls a pathCheck at an interval and notifies subscribers when a file has been modified.
-type broadcaster struct {
-	changeDetector  *pathCheck
-	interval        time.Duration
-	beforeBroadcast func(val string)
+// fsNotifyBroadcaster the broadcasts file system change notifications
+// to multiple subscribers. fsNotifyBroadcaster is safe for use concurrently.
+type fsNotifyBroadcaster struct {
+	beforeNotifyCh chan error
+	fsys           fs.FS
+	path           string
+	interval       time.Duration
+	done           <-chan struct{}
 
 	mu     sync.Mutex
-	sub    map[notifications]struct{}
+	sub    map[chan<- error]struct{}
 	cancel context.CancelFunc
 }
 
-// newBroadcaster returns a new broadcaster to which subscribers can subscribe for modifications detected by polling checker at interval.
-// Before broadcasting a file modification to subscribers, beforeBroadcast will be called with the modified filename.
-// The broadcaster will not start polling automatically upon creation, use start() to start polling.
-func newBroadcaster(checker *pathCheck, interval time.Duration, beforeBroadcast func(val string)) *broadcaster {
-	pub := broadcaster{
-		changeDetector:  checker,
-		interval:        interval,
-		sub:             make(map[notifications]struct{}),
-		beforeBroadcast: beforeBroadcast,
+// newFSNotifyBroadcaster returns a new fsNotifyBroadcaster.
+func newFSNotifyBroadcaster(fsys fs.FS, path string, interval time.Duration) *fsNotifyBroadcaster {
+	pub := fsNotifyBroadcaster{
+		beforeNotifyCh: make(chan error),
+		fsys:           fsys,
+		path:           path,
+		interval:       interval,
+		sub:            make(map[chan<- error]struct{}),
 	}
 	return &pub
 }
 
-// start starts polling for file changes and sends file update notifications to all subscribers.
-// A failing poll will emit an error event to subscribers and will not cause the notifier to be canceled automatically.
-func (b *broadcaster) start() {
-	ctx, cancel := context.WithCancel(context.Background())
-	b.cancel = cancel
+// subscribe adds a new subscriber to the broadcaster. If this is the first subscriber,
+// the monitoring process is started. It listens for the context to be canceled and
+// removes the subscriber when that happens. When the subscriber list is empty, the file
+// monitor is closed.
+func (b *fsNotifyBroadcaster) subscribe(ctx context.Context, n chan<- error) {
+	b.mu.Lock()
+	if len(b.sub) == 0 {
+		done := make(chan struct{})
+		b.done = done
+		c, cancel := context.WithCancel(context.Background())
+		b.cancel = cancel
+		n := fsNotify(c, b.fsys, b.path, b.interval)
+		go func() {
+			err := <-n
+			b.beforeNotifyCh <- err
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			for s := range b.sub {
+				select {
+				case s <- err:
+				default:
+				}
+			}
+			clear(b.sub)
+			close(done)
+		}()
+	}
+	b.sub[n] = struct{}{}
+	b.mu.Unlock()
 
-	t := time.NewTicker(b.interval)
 	go func() {
-		for range t.C {
-			if done(ctx.Done()) {
-				t.Stop()
-				return
-			}
-			ev, ok, err := b.changeDetector.modified()
-			if err != nil {
-				b.mu.Lock()
-				for s := range b.sub {
-					send(s.errCh, err)
-				}
-				b.mu.Unlock()
-			} else if ok {
-				b.beforeBroadcast(ev)
-				b.mu.Lock()
-				for s := range b.sub {
-					send(s.eventCh, ev)
-				}
-				b.mu.Unlock()
-			}
+		select {
+		case <-ctx.Done():
+		case <-b.done:
+			return
+		}
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		delete(b.sub, n)
+		if len(b.sub) == 0 {
+			b.cancel()
 		}
 	}()
-}
-
-// stop cancels the broadcaster that was started with start().
-// Canceling the notifier will not close the subscriber channels.
-func (b *broadcaster) stop() {
-	if b.cancel != nil {
-		b.cancel()
-	}
-}
-
-// subscribe subscribes n to be notified on updates. If this is the first
-// subscriber to b, the broadcaster will be started.
-func (b *broadcaster) subscribe(n notifications) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if len(b.sub) == 0 {
-		b.start()
-	}
-
-	b.sub[n] = struct{}{}
-}
-
-// unsubscribe unsubscribes n from the broadcaster.
-// If no subscribers are left after unsubscribing, the broadcaster is canceled.
-// The channels on n are not automatically closed.
-func (b *broadcaster) unsubscribe(n notifications) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	delete(b.sub, n)
-	if len(b.sub) == 0 {
-		b.stop()
-	}
 }
 
 type loadablePath string
@@ -163,60 +149,53 @@ type loaderPath string
 type multiplexer struct {
 	fsys         fs.FS
 	mu           sync.Mutex
-	broadcaster  map[loaderPath]*broadcaster
+	broadcaster  map[loaderPath]*fsNotifyBroadcaster
 	topic        map[loadablePath]map[loaderPath]struct{}
-	subscribers  map[loadablePath]map[notifications]struct{}
-	subscribedTo map[notifications]loadablePath
+	subscribers  map[loadablePath]map[chan error]context.Context
+	subscribedTo map[chan error]loadablePath
 }
 
 // newMultiplexer returns a Multiplexer using f to create broadcasters.
 func newMultiplexer(fsys fs.FS) *multiplexer {
 	return &multiplexer{
 		fsys:         fsys,
-		broadcaster:  make(map[loaderPath]*broadcaster),
+		broadcaster:  make(map[loaderPath]*fsNotifyBroadcaster),
 		topic:        make(map[loadablePath]map[loaderPath]struct{}),
-		subscribers:  make(map[loadablePath]map[notifications]struct{}),
-		subscribedTo: make(map[notifications]loadablePath),
+		subscribers:  make(map[loadablePath]map[chan error]context.Context),
+		subscribedTo: make(map[chan error]loadablePath),
 	}
 }
 
 // subscribe returns a Notifications that is subscribed to all events that occur on any broadcaster registered to key.
-func (m *multiplexer) subscribe(key loadablePath) (notifications, error) {
+func (m *multiplexer) subscribe(ctx context.Context, key loadablePath) <-chan error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	n := notifications{
-		eventCh: make(chan string),
-		errCh:   make(chan error),
-	}
+	n := make(chan error)
 	if m.subscribers[key] == nil {
-		m.subscribers[key] = make(map[notifications]struct{})
+		m.subscribers[key] = make(map[chan error]context.Context)
 	}
 
-	m.subscribers[key][n] = struct{}{}
+	m.subscribers[key][n] = ctx
 	m.subscribedTo[n] = key
 
+	// find the broadcaster for each dependency of root and subscribe to it
 	for v := range m.topic[key] {
-		m.broadcaster[v].subscribe(n)
+		m.broadcaster[v].subscribe(ctx, n)
 	}
 
-	return n, nil
-}
+	go func() {
+		<-ctx.Done()
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		delete(m.subscribers[key], n)
+		delete(m.subscribedTo, n)
+		if len(m.subscribers[key]) == 0 {
+			delete(m.subscribers, key)
+			delete(m.topic, key)
+		}
+	}()
 
-// unsubscribe unsubscribes n from all subscriptions.
-// If no subscribers are left the topic, the topic is deleted.
-func (m *multiplexer) unsubscribe(n notifications) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	key := m.subscribedTo[n]
-	for v := range m.topic[key] {
-		m.broadcaster[v].unsubscribe(n)
-	}
-	delete(m.subscribers[key], n)
-	delete(m.subscribedTo, n)
-	if len(m.subscribers[key]) == 0 {
-		delete(m.subscribers, key)
-		delete(m.topic, key)
-	}
+	return n
 }
 
 // register registers value under key and subscribes all subscribers on key to value.
@@ -226,28 +205,30 @@ func (m *multiplexer) register(key loadablePath, value loaderPath) error {
 	defer m.mu.Unlock()
 	broadcaster := m.broadcaster[value]
 	if broadcaster == nil {
-		pc, err := newPathCheck(m.fsys, string(value))
-		if err != nil {
-			return err
-		}
-		broadcaster := newBroadcaster(pc, 250*time.Millisecond, func(val string) {
-			m.mu.Lock()
-			defer m.mu.Unlock()
-			for k, v := range m.topic {
-				if _, ok := v[loaderPath(val)]; ok {
-					delete(m.topic, k)
+		broadcaster = newFSNotifyBroadcaster(m.fsys, string(value), 250*time.Millisecond)
+		go func() {
+			for err := range broadcaster.beforeNotifyCh {
+				if err != nil {
+					continue
 				}
+				m.mu.Lock()
+				for k, v := range m.topic {
+					if _, ok := v[loaderPath(value)]; ok {
+						delete(m.topic, k)
+					}
+				}
+				m.mu.Unlock()
 			}
-		})
+		}()
 		m.broadcaster[value] = broadcaster
 	}
 
 	// add to dependents of referer
 	for rPath, vPath := range m.topic {
 		if _, ok := vPath[loaderPath(key)]; ok {
-			vPath[value] = struct{}{}
-			for v := range m.subscribers[rPath] {
-				m.broadcaster[value].subscribe(v)
+			m.topic[rPath][value] = struct{}{}
+			for v, c := range m.subscribers[rPath] {
+				m.broadcaster[value].subscribe(c, v)
 			}
 		}
 	}
@@ -256,32 +237,10 @@ func (m *multiplexer) register(key loadablePath, value loaderPath) error {
 	if m.topic[key] == nil {
 		m.topic[key] = make(map[loaderPath]struct{})
 	}
-
 	m.topic[key][value] = struct{}{}
 
-	for v := range m.subscribers[key] {
-		m.broadcaster[value].subscribe(v)
+	for v, c := range m.subscribers[key] {
+		m.broadcaster[value].subscribe(c, v)
 	}
 	return nil
-}
-
-// done does a non-blocking check to determine if d is closed.
-func done(d <-chan struct{}) bool {
-	select {
-	case <-d:
-		return true
-	default:
-		return false
-	}
-
-}
-
-// send does a non-blocking send val to ch. Returns weather sending was successful.
-func send[T any](ch chan<- T, val T) bool {
-	select {
-	case ch <- val:
-		return true
-	default:
-		return false
-	}
 }

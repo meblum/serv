@@ -160,15 +160,9 @@ func (s *server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	n, err := s.m.subscribe(loadablePath(clean(p.Path)))
-	if err != nil {
-		log.Println(err)
-		http.Error(w, err.Error(), 500)
-		return
-	}
+	n := s.m.subscribe(r.Context(), loadablePath(clean(p.Path)))
 	w.Header().Set("Content-Type", "text/event-stream")
 	flusher.Flush()
-	defer s.m.unsubscribe(n)
 
 	for {
 		select {
@@ -176,14 +170,24 @@ func (s *server) handleSSE(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-s.ctx.Done():
 			return
-		case v := <-n.eventCh:
-			if _, err := fmt.Fprintf(w, "data: %v\n\n", v); err != nil {
+		default:
+		}
+
+		select {
+		case <-r.Context().Done():
+			return
+		case <-s.ctx.Done():
+			return
+		case err := <-n:
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			if _, err := fmt.Fprint(w, "data:\n\n"); err != nil {
 				log.Println(err)
 				return
 			}
 			flusher.Flush()
-		case err := <-n.errCh:
-			log.Println(err)
 		}
 	}
 }
