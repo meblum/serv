@@ -13,6 +13,7 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // injectWriter is a wrapper on an http.ResponseWriter passed to http.FileServer, which injects a
@@ -193,7 +194,7 @@ func (s *server) handleSSE(w http.ResponseWriter, r *http.Request) {
 }
 
 func isRequestSSE(r *http.Request) bool {
-	return r.URL.Path == "/" && r.Header.Get("Accept") == "text/event-stream"
+	return r.URL.Path == "/" && strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 }
 
 // clean extracts from name the path to the file served
