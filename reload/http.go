@@ -13,10 +13,11 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // injectWriter is a wrapper on an http.ResponseWriter passed to http.FileServer, which injects a
-// reload script to the response if content tpe is text/html
+// reload script to the response if content type is text/html
 type injectWriter struct {
 	http.ResponseWriter
 	afterPattern *regexp.Regexp
@@ -63,7 +64,7 @@ func (w *injectWriter) Write(data []byte) (int, error) {
 	return n1 + n2, err
 }
 
-// WriteHeader writes statusCode tot he client. This is the only place where we have a chance to override
+// WriteHeader writes statusCode to the client. This is the only place where we have a chance to override
 // the content-length to count for the injected script.
 func (w *injectWriter) WriteHeader(statusCode int) {
 	defer w.ResponseWriter.WriteHeader(statusCode)
@@ -157,7 +158,7 @@ func (s *server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	p, err := url.Parse(r.Header.Get("Referer"))
 	if err != nil {
 		log.Println(err)
-		http.Error(w, err.Error(), 500)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	n := s.m.subscribe(r.Context(), loadablePath(clean(p.Path)))
@@ -193,7 +194,7 @@ func (s *server) handleSSE(w http.ResponseWriter, r *http.Request) {
 }
 
 func isRequestSSE(r *http.Request) bool {
-	return r.URL.Path == "/" && r.Header.Get("Accept") == "text/event-stream"
+	return r.URL.Path == "/" && strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 }
 
 // clean extracts from name the path to the file served

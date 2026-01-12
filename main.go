@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/meblum/serv/reload"
@@ -139,7 +140,7 @@ func main() {
 
 		h := server.Handler
 		resetShutdownMiddleware := func(w http.ResponseWriter, r *http.Request) {
-			isSSE := r.URL.Path == "/" && r.Header.Get("Accept") == "text/event-stream"
+			isSSE := r.URL.Path == "/" && strings.Contains(r.Header.Get("Accept"), "text/event-stream")
 			if !isSSE {
 				if rescheduled := shutdownTimer.Reset(conf.shutdownAfter); !rescheduled {
 					// shutdown in progress

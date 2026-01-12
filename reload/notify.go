@@ -14,7 +14,7 @@ import (
 // Monitoring stops either when a change is found, an error occurs, or
 // the provided context is canceled.
 //
-// THe channel will return an error if monitoring fails, or the context's error if canceled.
+// The channel will return an error if monitoring fails, or the context's error if canceled.
 func fsNotify(ctx context.Context, fsys fs.FS, path string, interval time.Duration) <-chan error {
 	notify := make(chan error, 1)
 
@@ -199,7 +199,7 @@ func (m *multiplexer) subscribe(ctx context.Context, key loadablePath) <-chan er
 }
 
 // register registers value under key and subscribes all subscribers on key to value.
-// If a broadcaster has not been created, it is created an error returned if creation fails.
+// If a broadcaster has not been created, it is created and an error is returned if creation fails.
 func (m *multiplexer) register(key loadablePath, value loaderPath) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
